@@ -61,20 +61,59 @@ function solve(model::MySimulatedAnnealingMinimumVariancePortfolioAllocationProb
 
     # initialize parameters for simulated annealing -
     T = T₀; # initial T -
-    current_w = w;
+    current_w = copy(w);
     current_f = _objective_function(current_w, ḡ, Σ̂, R, μ, ρ);
     
     # best solution found so far -
-    w_best = current_w;
+    w_best = copy(current_w);
     f_best = current_f;
     KL = K;
+    candidate_w = similar(current_w);
+    perturb = similar(current_w);
 
     while has_converged == false
     
         accepted_counter = 0; 
-        
-        # TODO: Implement simulated annealing logic here -
-        throw(ErrorException("Oooops! Simulated annealing logic not yet implemented!!"));
+    
+    #TODO: simulated annealing main loop
+
+        for _ in 1:KL
+            randn!(perturb);
+            total = 0.0;
+            @inbounds @simd for i in eachindex(candidate_w)
+                val = current_w[i] + β*perturb[i];
+                if val < 1.0e-6
+                    val = 1.0e-6;
+                end
+                candidate_w[i] = val;
+                total += val;
+            end
+            inv_total = inv(total);
+            @inbounds @simd for i in eachindex(candidate_w)
+                candidate_w[i] *= 1.0/total;
+            end
+
+            new_f = _objective_function(candidate_w, ḡ, Σ̂, R, μ, ρ);
+            Δf = new_f - current_f;
+
+            if Δf <= 0.0
+                copyto!(current_w, candidate_w);
+                current_f = new_f;
+                accepted_counter += 1;
+            elseif T > 0.0
+                prob = exp(-Δf / T);
+                if rand() < prob
+                    copyto!(current_w, candidate_w);
+                    current_f = new_f;
+                    accepted_counter += 1;
+                end
+            end
+
+            if new_f < f_best
+                copyto!(w_best, candidate_w);
+                f_best = new_f;
+            end
+        end
 
         # update KL -
         fraction_accepted = accepted_counter/KL; # what is the fraction of accepted moves
@@ -90,6 +129,16 @@ function solve(model::MySimulatedAnnealingMinimumVariancePortfolioAllocationProb
         end
 
         # update penalty parameters and T -
+        # μ *= τ*μ;
+        # ρ *= τ*ρ;
+
+        # if (T ≤ T₁)
+        #     has_converged = true;
+        # else
+        #     T *= (α*T); # Not done yet, so decrease the T -
+        # end
+       
+        # correctly decay penalty parameters and temperature
         μ *= τ*μ;
         ρ *= τ*ρ;
 
@@ -98,6 +147,19 @@ function solve(model::MySimulatedAnnealingMinimumVariancePortfolioAllocationProb
         else
             T *= (α*T); # Not done yet, so decrease the T -
         end
+        μ *= τ
+        ρ *= τ
+
+        if T <= T₁
+            has_converged = true
+        else
+            T *= α    # multiplicative cooling: T = α * T
+        end
+
+        if verbose
+            println("T=$(round(T,digits=6)) μ=$(round(μ,digits=6)) ρ=$(round(ρ,digits=6)) accepted_frac=$(round(fraction_accepted,digits=4))")
+        end
+# ...existing code...
     end
 
     # update the model with the optimal weights -
